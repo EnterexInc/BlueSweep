@@ -16,26 +16,40 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.example.bluesweepmock.R
+import com.example.bluesweepmock.data.EventDataStore
 import com.example.bluesweepmock.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Schedule
+import kotlinx.coroutines.launch
+import android.widget.Toast
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CleanupEventScreen(
-    onNavigateBack: () -> Unit,
-    onCreateEvent: () -> Unit
+    onNavigateBack: () -> Unit
 ) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val eventDataStore = remember { EventDataStore(context) }
+    
     // Sample events data with Malaysian locations
-    val events = listOf(
+    val sampleEvents = listOf(
         CleanupEvent(
             id = 1,
             title = "Shah Alam Lake Cleanup",
@@ -103,6 +117,23 @@ fun CleanupEventScreen(
         )
     )
     
+    // State for custom events
+    var customEvents by remember { mutableStateOf<List<CleanupEvent>>(emptyList()) }
+    var showCreateEventDialog by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(false) }
+    
+    // Load custom events
+    LaunchedEffect(key1 = Unit) {
+        eventDataStore.eventsFlow.collect { events ->
+            customEvents = events
+        }
+    }
+    
+    // Combine sample and custom events, sorted by date
+    val allEvents = remember(customEvents) {
+        (sampleEvents + customEvents).sortedBy { it.date }
+    }
+    
     // Date formatter
     val dateFormatter = SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.getDefault())
 
@@ -111,77 +142,140 @@ fun CleanupEventScreen(
             .fillMaxSize()
             .background(BackgroundBlue)
     ) {
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
                 .padding(top = 48.dp, bottom = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Header with back button
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onNavigateBack) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = OceanBlue
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = OceanBlue
+                        )
+                    }
+                    Text(
+                        text = "Local Cleanup Events",
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = OceanBlue,
+                        fontWeight = FontWeight.Bold
                     )
+                    // Empty box for alignment
+                    Box(modifier = Modifier.size(48.dp))
                 }
-                Text(
-                    text = "Local Cleanup Events",
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = OceanBlue,
-                    fontWeight = FontWeight.Bold
-                )
-                // Empty box for alignment
-                Box(modifier = Modifier.size(48.dp))
             }
             
             // Create Event Button
-            Button(
-                onClick = onCreateEvent,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = OceanBlue
-                ),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp)
-            ) {
+            item {
+                Button(
+                    onClick = { showCreateEventDialog = true },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = OceanBlue
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Create Event",
+                        tint = White
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Create Your Own Event",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = White
+                    )
+                }
+            }
+            
+            // Events List Header
+            item {
                 Text(
-                    text = "Create Your Own Event",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = White
+                    text = "Upcoming Events in Selangor",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = OceanBlue,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
             
             // Events List
-            Text(
-                text = "Upcoming Events in Selangor",
-                style = MaterialTheme.typography.titleLarge,
-                color = OceanBlue,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.align(Alignment.Start)
-            )
-            
-            Column(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                events.forEach { event ->
-                    EventCard(
-                        event = event,
-                        formattedDate = dateFormatter.format(event.date)
-                    )
+            items(allEvents) { event ->
+                EventCard(
+                    event = event,
+                    formattedDate = dateFormatter.format(event.date),
+                    onRegister = { eventId ->
+                        coroutineScope.launch {
+                            eventDataStore.registerForEvent(eventId)
+                            Toast.makeText(
+                                context,
+                                "Successfully registered for event!",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                )
+            }
+        }
+        
+        // Create Event Dialog
+        if (showCreateEventDialog) {
+            CreateEventDialog(
+                onDismiss = { showCreateEventDialog = false },
+                onCreateEvent = { title, description, date, time, location, maxParticipants, imageType, customImageUri ->
+                    coroutineScope.launch {
+                        isLoading = true
+                        try {
+                            eventDataStore.addEvent(
+                                title = title,
+                                description = description,
+                                date = date,
+                                time = time,
+                                location = location,
+                                maxParticipants = maxParticipants,
+                                imageType = imageType,
+                                customImageUri = customImageUri
+                            )
+                            
+                            Toast.makeText(
+                                context,
+                                "Event created successfully!",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            
+                            showCreateEventDialog = false
+                        } finally {
+                            isLoading = false
+                        }
+                    }
                 }
+            )
+        }
+        
+        // Loading Indicator
+        if (isLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.5f)),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = OceanBlue)
             }
         }
     }
@@ -190,7 +284,8 @@ fun CleanupEventScreen(
 @Composable
 fun EventCard(
     event: CleanupEvent,
-    formattedDate: String
+    formattedDate: String,
+    onRegister: (Int) -> Unit
 ) {
     var showMapDialog by remember { mutableStateOf(false) }
     
@@ -207,14 +302,31 @@ fun EventCard(
                 .fillMaxWidth()
         ) {
             // Event Image
-            Image(
-                painter = painterResource(id = event.imageResId),
-                contentDescription = event.title,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(120.dp),
-                contentScale = ContentScale.Crop
-            )
+            if (event.customImageUri != null) {
+                // Display custom image
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(event.customImageUri)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = event.title,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(120.dp),
+                    contentScale = ContentScale.Crop,
+                    error = painterResource(id = R.drawable.beach) // Fallback image
+                )
+            } else {
+                // Display default image
+                Image(
+                    painter = painterResource(id = event.imageResId),
+                    contentDescription = event.title,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(120.dp),
+                    contentScale = ContentScale.Crop
+                )
+            }
             
             // Event Details
             Column(
@@ -245,7 +357,7 @@ fun EventCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        painter = painterResource(id = R.drawable.ocean_mascot), // Placeholder, replace with calendar icon
+                        imageVector = Icons.Default.CalendarMonth,
                         contentDescription = "Date",
                         tint = OceanBlue,
                         modifier = Modifier.size(20.dp)
@@ -266,7 +378,7 @@ fun EventCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        painter = painterResource(id = R.drawable.ocean_mascot), // Placeholder, replace with time icon
+                        imageVector = Icons.Default.Schedule,
                         contentDescription = "Time",
                         tint = OceanBlue,
                         modifier = Modifier.size(20.dp)
@@ -288,10 +400,11 @@ fun EventCard(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
                     ) {
                         Icon(
-                            painter = painterResource(id = R.drawable.ocean_mascot), // Placeholder, replace with location icon
+                            imageVector = Icons.Default.LocationOn,
                             contentDescription = "Location",
                             tint = OceanBlue,
                             modifier = Modifier.size(20.dp)
@@ -300,7 +413,8 @@ fun EventCard(
                         Text(
                             text = event.location,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = TextGray
+                            color = TextGray,
+                            maxLines = 2
                         )
                     }
                     
@@ -309,10 +423,11 @@ fun EventCard(
                         onClick = { showMapDialog = true },
                         colors = ButtonDefaults.textButtonColors(
                             contentColor = OceanBlue
-                        )
+                        ),
+                        modifier = Modifier.padding(start = 4.dp)
                     ) {
                         Icon(
-                            painter = painterResource(id = R.drawable.ocean_mascot), // Placeholder, replace with map icon
+                            imageVector = Icons.Default.Map,
                             contentDescription = "View Map",
                             tint = OceanBlue,
                             modifier = Modifier.size(20.dp)
@@ -337,13 +452,14 @@ fun EventCard(
                     )
                     
                     Button(
-                        onClick = { /* TODO: Implement registration */ },
+                        onClick = { onRegister(event.id) },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = OceanBlue
                         ),
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(8.dp),
+                        enabled = event.participants < event.maxParticipants
                     ) {
-                        Text("Register")
+                        Text(if (event.participants < event.maxParticipants) "Register" else "Full")
                     }
                 }
             }
@@ -434,5 +550,6 @@ data class CleanupEvent(
     val location: String,
     val participants: Int,
     val maxParticipants: Int,
-    val imageResId: Int
+    val imageResId: Int,
+    val customImageUri: String? = null
 ) 

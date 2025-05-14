@@ -35,18 +35,32 @@ import com.example.bluesweepmock.ui.theme.*
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
-    onNavigateBack: () -> Unit
+    email: String,
+    userName: String,
+    userBio: String,
+    userLocation: String,
+    userUsername: String,
+    onNavigateBack: () -> Unit,
+    onUpdateProfile: (name: String, bio: String, location: String, username: String) -> Unit,
+    onLogout: () -> Unit
 ) {
-    // Sample user data
+    // State for edit profile dialog
+    var showEditDialog by remember { mutableStateOf(false) }
+    var name by remember { mutableStateOf(userName) }
+    var bio by remember { mutableStateOf(userBio) }
+    var location by remember { mutableStateOf(userLocation) }
+    var username by remember { mutableStateOf(userUsername) }
+
+    // Create a user profile from the provided data
     val user = UserProfile(
-        name = "Shairyishuanda bin Raj",
-        username = "@raj_ocean",
-        bio = "Marine conservation enthusiast | Ocean cleanup volunteer | Love diving and protecting marine life",
-        location = "Kuala Lumpur, Malaysia",
-        joinDate = "Joined March 2023",
-        eventsAttended = 12,
-        wasteReports = 28,
-        impactScore = 85,
+        name = if (userName.isBlank()) email.substringBefore("@") else userName,
+        username = username,
+        bio = bio,
+        location = location,
+        joinDate = "Joined BlueSweep",
+        eventsAttended = 0,
+        wasteReports = 0,
+        impactScore = 0,
         profileImageResId = R.drawable.mascot
     )
     
@@ -56,19 +70,19 @@ fun ProfileScreen(
             name = "Ocean Guardian",
             description = "Participated in 10+ cleanup events",
             iconResId = R.drawable.beach,
-            isUnlocked = true
+            isUnlocked = false
         ),
         Badge(
             name = "Waste Warrior",
             description = "Reported 25+ waste items",
             iconResId = R.drawable.plastic_pollution,
-            isUnlocked = true
+            isUnlocked = false
         ),
         Badge(
             name = "Community Leader",
             description = "Organized 3+ cleanup events",
             iconResId = R.drawable.mangrove,
-            isUnlocked = true
+            isUnlocked = false
         ),
         Badge(
             name = "Marine Expert",
@@ -84,33 +98,8 @@ fun ProfileScreen(
         )
     )
     
-    // Sample achievements
-    val achievements = listOf(
-        Achievement(
-            title = "First Cleanup",
-            description = "Participated in your first ocean cleanup event",
-            date = "March 15, 2023",
-            iconResId = R.drawable.beach
-        ),
-        Achievement(
-            title = "Waste Reporter",
-            description = "Reported your first waste item",
-            date = "April 2, 2023",
-            iconResId = R.drawable.plastic_pollution
-        ),
-        Achievement(
-            title = "Event Organizer",
-            description = "Organized your first cleanup event",
-            date = "June 10, 2023",
-            iconResId = R.drawable.mangrove
-        ),
-        Achievement(
-            title = "Community Builder",
-            description = "Invited 5 friends to join BlueSweep",
-            date = "August 22, 2023",
-            iconResId = R.drawable.lake
-        )
-    )
+    // Sample achievements (empty for new users)
+    val achievements = listOf<Achievement>()
 
     Box(
         modifier = Modifier
@@ -155,7 +144,11 @@ fun ProfileScreen(
             }
             
             // Profile Header
-            ProfileHeader(user)
+            ProfileHeader(
+                user = user,
+                email = email,
+                onEditProfileClick = { showEditDialog = true }
+            )
             
             // Stats Section
             StatsSection(user)
@@ -163,20 +156,45 @@ fun ProfileScreen(
             // Badges Section
             BadgesSection(badges)
             
-            // Achievements Section
-            AchievementsSection(achievements)
+            // Achievements Section if there are any
+            if (achievements.isNotEmpty()) {
+                AchievementsSection(achievements)
+            }
             
             // Settings Options
             SettingsOptions()
             
             // Logout Button
-            LogoutButton()
+            LogoutButton(onLogout)
         }
+    }
+    
+    // Edit Profile Dialog
+    if (showEditDialog) {
+        EditProfileDialog(
+            name = name,
+            username = username,
+            bio = bio,
+            location = location,
+            onNameChange = { name = it },
+            onUsernameChange = { username = it },
+            onBioChange = { bio = it },
+            onLocationChange = { location = it },
+            onDismiss = { showEditDialog = false },
+            onSave = {
+                onUpdateProfile(name, bio, location, username)
+                showEditDialog = false
+            }
+        )
     }
 }
 
 @Composable
-fun ProfileHeader(user: UserProfile) {
+fun ProfileHeader(
+    user: UserProfile,
+    email: String,
+    onEditProfileClick: () -> Unit
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -213,6 +231,13 @@ fun ProfileHeader(user: UserProfile) {
         Text(
             text = user.username,
             style = MaterialTheme.typography.bodyLarge,
+            color = TextGray
+        )
+        
+        // Email
+        Text(
+            text = email,
+            style = MaterialTheme.typography.bodyMedium,
             color = TextGray
         )
         
@@ -263,7 +288,7 @@ fun ProfileHeader(user: UserProfile) {
         
         // Edit Profile Button
         OutlinedButton(
-            onClick = { /* TODO: Implement edit profile */ },
+            onClick = onEditProfileClick,
             colors = ButtonDefaults.outlinedButtonColors(
                 contentColor = OceanBlue
             ),
@@ -672,27 +697,35 @@ fun SettingsItem(
 }
 
 @Composable
-fun LogoutButton() {
+fun LogoutButton(onLogout: () -> Unit) {
     Button(
-        onClick = { /* TODO: Implement logout */ },
+        onClick = onLogout,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp),
+            .padding(16.dp)
+            .height(50.dp),
         colors = ButtonDefaults.buttonColors(
-            containerColor = Color.Red.copy(alpha = 0.1f),
-            contentColor = Color.Red
+            containerColor = Color.Red.copy(alpha = 0.8f)
         ),
         shape = RoundedCornerShape(12.dp)
     ) {
-        Icon(
-            imageVector = Icons.Default.Logout,
-            contentDescription = "Logout",
-            modifier = Modifier.size(16.dp)
-        )
-        
-        Spacer(modifier = Modifier.width(8.dp))
-        
-        Text("Logout")
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Logout,
+                contentDescription = "Logout",
+                tint = Color.White
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Logout",
+                color = Color.White,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Bold
+            )
+        }
     }
 }
 

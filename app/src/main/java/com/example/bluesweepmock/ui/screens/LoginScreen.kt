@@ -21,8 +21,8 @@ import com.example.bluesweepmock.ui.theme.*
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LoginScreen(
-    onLoginClick: () -> Unit,
-    onSignUpClick: () -> Unit,
+    onLoginClick: (email: String, password: String) -> Unit,
+    onSignUpClick: (email: String, password: String) -> Unit,
     onForgotPasswordClick: () -> Unit
 ) {
     var email by remember { mutableStateOf("") }
@@ -48,7 +48,7 @@ fun LoginScreen(
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(bottom = 8.dp)
             )
-            
+
             Text(
                 text = "Join us in making our oceans cleaner",
                 style = MaterialTheme.typography.bodyLarge,
@@ -107,7 +107,7 @@ fun LoginScreen(
 
             // Login Button
             Button(
-                onClick = onLoginClick,
+                onClick = { onLoginClick(email, password) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(50.dp),
@@ -121,7 +121,7 @@ fun LoginScreen(
 
             // Sign Up Button
             OutlinedButton(
-                onClick = onSignUpClick,
+                onClick = { onSignUpClick(email, password) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(50.dp)
@@ -146,4 +146,4 @@ fun LoginScreen(
             }
         }
     }
-} 
+}

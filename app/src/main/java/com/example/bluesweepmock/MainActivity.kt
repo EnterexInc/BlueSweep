@@ -1,6 +1,7 @@
 package com.example.bluesweepmock
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -9,81 +10,219 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import com.example.bluesweepmock.ui.screens.CleanupEventScreen
-import com.example.bluesweepmock.ui.screens.HomeScreen
-import com.example.bluesweepmock.ui.screens.LoginScreen
-import com.example.bluesweepmock.ui.screens.PollutionAwarenessScreen
-import com.example.bluesweepmock.ui.screens.ProfileScreen
-import com.example.bluesweepmock.ui.screens.WasteTrackingScreen
+import androidx.lifecycle.lifecycleScope
+import com.example.bluesweepmock.data.UserDataStore
+import com.example.bluesweepmock.ui.screens.*
 import com.example.bluesweepmock.ui.theme.BlueSweepMockTheme
+import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.launch
+
 
 class MainActivity : ComponentActivity() {
+
+    private lateinit var auth: FirebaseAuth
+    private lateinit var userDataStore: UserDataStore
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        auth = FirebaseAuth.getInstance()
+        userDataStore = UserDataStore(this)
+
         setContent {
             BlueSweepMockTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    // Simple state to track if user is logged in
-                    var isLoggedIn by remember { mutableStateOf(false) }
-                    
-                    // State to track current screen
-                    var currentScreen by remember { mutableStateOf("login") }
-                    
+                    var isLoggedIn by remember { mutableStateOf(auth.currentUser != null) }
+                    var currentScreen by remember { mutableStateOf(if (isLoggedIn) "home" else "login") }
+                    var resetEmailDialogVisible by remember { mutableStateOf(false) }
+                    var resetEmail by remember { mutableStateOf("") }
+
+                    // Collect user profile data
+                    val userName by userDataStore.userNameFlow.collectAsState(initial = "")
+                    val userBio by userDataStore.userBioFlow.collectAsState(initial = "")
+                    val userLocation by userDataStore.userLocationFlow.collectAsState(initial = "")
+                    val userUsername by userDataStore.userUsernameFlow.collectAsState(initial = "")
+
+                    // Get the current user's email
+                    val userEmail = auth.currentUser?.email ?: ""
+
                     when (currentScreen) {
                         "login" -> {
-                            // Show LoginScreen when not logged in
                             LoginScreen(
-                                onLoginClick = { 
-                                    isLoggedIn = true
-                                    currentScreen = "home"
+                                onLoginClick = { email, password ->
+                                    if (email.isBlank() || password.isBlank()) {
+                                        Toast.makeText(
+                                            this,
+                                            "Email and password cannot be empty",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                        return@LoginScreen
+                                    }
+                                    
+                                    auth.signInWithEmailAndPassword(email, password)
+                                        .addOnCompleteListener(this) { task ->
+                                            if (task.isSuccessful) {
+                                                isLoggedIn = true
+                                                currentScreen = "home"
+                                            } else {
+                                                Toast.makeText(
+                                                    this,
+                                                    "Login failed: ${task.exception?.message}",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        }
                                 },
-                                onSignUpClick = { 
-                                    isLoggedIn = true
-                                    currentScreen = "home"
+                                onSignUpClick = { email, password ->
+                                    if (email.isBlank() || password.isBlank()) {
+                                        Toast.makeText(
+                                            this,
+                                            "Email and password cannot be empty",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                        return@LoginScreen
+                                    }
+                                    
+                                    if (password.length < 6) {
+                                        Toast.makeText(
+                                            this,
+                                            "Password must be at least 6 characters long",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                        return@LoginScreen
+                                    }
+                                    
+                                    auth.createUserWithEmailAndPassword(email, password)
+                                        .addOnCompleteListener(this) { task ->
+                                            if (task.isSuccessful) {
+                                                isLoggedIn = true
+                                                currentScreen = "home"
+                                                
+                                                // Send email verification
+                                                auth.currentUser?.sendEmailVerification()
+                                                    ?.addOnCompleteListener { verificationTask ->
+                                                        if (verificationTask.isSuccessful) {
+                                                            Toast.makeText(
+                                                                this,
+                                                                "Verification email sent",
+                                                                Toast.LENGTH_SHORT
+                                                            ).show()
+                                                        }
+                                                    }
+                                            } else {
+                                                Toast.makeText(
+                                                    this,
+                                                    "Sign-up failed: ${task.exception?.message}",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        }
                                 },
-                                onForgotPasswordClick = { /* TODO: Handle forgot password */ }
+                                onForgotPasswordClick = {
+                                    resetEmailDialogVisible = true
+                                }
                             )
+                            
+                            // Password Reset Dialog
+                            if (resetEmailDialogVisible) {
+                                ResetPasswordDialog(
+                                    email = resetEmail,
+                                    onEmailChange = { resetEmail = it },
+                                    onDismiss = { resetEmailDialogVisible = false },
+                                    onReset = {
+                                        if (resetEmail.isBlank()) {
+                                            Toast.makeText(
+                                                this,
+                                                "Email cannot be empty",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                            return@ResetPasswordDialog
+                                        }
+                                        
+                                        auth.sendPasswordResetEmail(resetEmail)
+                                            .addOnCompleteListener { task ->
+                                                if (task.isSuccessful) {
+                                                    Toast.makeText(
+                                                        this,
+                                                        "Password reset email sent",
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
+                                                    resetEmailDialogVisible = false
+                                                } else {
+                                                    Toast.makeText(
+                                                        this,
+                                                        "Failed to send reset email: ${task.exception?.message}",
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
+                                                }
+                                            }
+                                    }
+                                )
+                            }
                         }
+
                         "home" -> {
-                            // Show HomeScreen when logged in
                             HomeScreen(
-                                username = "Ocean Lover",
+                                username = userEmail,
                                 onNavigateToEvents = { currentScreen = "events" },
                                 onNavigateToProfile = { currentScreen = "profile" },
                                 onNavigateToPollution = { currentScreen = "pollution" },
                                 onNavigateToWasteTracking = { currentScreen = "waste_tracking" }
                             )
                         }
+
                         "pollution" -> {
-                            // Show PollutionAwarenessScreen
                             PollutionAwarenessScreen(
                                 onNavigateBack = { currentScreen = "home" }
                             )
                         }
+
                         "events" -> {
-                            // Show CleanupEventScreen
                             CleanupEventScreen(
-                                onNavigateBack = { currentScreen = "home" },
-                                onCreateEvent = { /* TODO: Implement create event */ }
+                                onNavigateBack = { currentScreen = "home" }
                             )
                         }
+
                         "waste_tracking" -> {
-                            // Show WasteTrackingScreen
                             WasteTrackingScreen(
                                 onNavigateBack = { currentScreen = "home" }
                             )
                         }
+
                         "profile" -> {
-                            // Show ProfileScreen
                             ProfileScreen(
-                                onNavigateBack = { currentScreen = "home" }
+                                email = userEmail,
+                                userName = userName,
+                                userBio = userBio,
+                                userLocation = userLocation,
+                                userUsername = if (userUsername.isBlank()) "@${userEmail.substringBefore("@")}" else userUsername,
+                                onNavigateBack = { currentScreen = "home" },
+                                onUpdateProfile = { name, bio, location, username ->
+                                    lifecycleScope.launch {
+                                        userDataStore.updateUserProfile(name, bio, location, username)
+                                        Toast.makeText(
+                                            this@MainActivity,
+                                            "Profile updated successfully",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                },
+                                onLogout = {
+                                    auth.signOut()
+                                    isLoggedIn = false
+                                    currentScreen = "login"
+                                    Toast.makeText(
+                                        this,
+                                        "Logged out successfully",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
                             )
                         }
-                        // Add other screens as needed
                     }
                 }
             }

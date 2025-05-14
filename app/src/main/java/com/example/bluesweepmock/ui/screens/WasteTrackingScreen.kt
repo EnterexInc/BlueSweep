@@ -1,5 +1,7 @@
 package com.example.bluesweepmock.ui.screens
 
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -12,6 +14,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.Camera
 import androidx.compose.material.icons.outlined.Close
@@ -26,13 +29,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.bluesweepmock.R
+import com.example.bluesweepmock.data.WasteReportStore
 import com.example.bluesweepmock.ui.theme.*
+import com.example.bluesweepmock.utils.LocationManager
+import com.example.bluesweepmock.utils.PhotoManager
+import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.android.gms.maps.model.CameraPosition
+import com.google.android.gms.maps.model.LatLng
+import com.google.maps.android.compose.*
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -50,12 +64,20 @@ data class WasteReport(
 fun WasteTrackingScreen(
     onNavigateBack: () -> Unit
 ) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    
+    // Initialize managers and view model
+    val photoManager = remember { PhotoManager(context) }
+    val locationManager = remember { LocationManager(context) }
+    val wasteReportStore = remember { WasteReportStore(context) }
+    
     var selectedTabIndex by remember { mutableStateOf(0) }
     val tabs = listOf("Report", "History")
     
     // State for photo upload
     var showPhotoOptions by remember { mutableStateOf(false) }
-    var hasPhoto by remember { mutableStateOf(false) }
+    var photoUri by remember { mutableStateOf<Uri?>(null) }
     
     // State for description
     var description by remember { mutableStateOf("") }
@@ -64,36 +86,24 @@ fun WasteTrackingScreen(
     var location by remember { mutableStateOf("") }
     var showLocationDialog by remember { mutableStateOf(false) }
     
-    // State for map dialog
-    var showMapDialog by remember { mutableStateOf(false) }
+    // State for reports
+    var reports by remember { mutableStateOf<List<WasteReport>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(false) }
+    var showSuccessMessage by remember { mutableStateOf(false) }
     
-    // Sample waste reports for history
-    val dateFormat = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
-    val sampleReports = remember {
-        listOf(
-            WasteReport(
-                1,
-                "Plastic bottles and food wrappers found near the shoreline",
-                "Taman Tasik Shah Alam, Selangor",
-                Date(System.currentTimeMillis() - 86400000 * 2), // 2 days ago
-                "plasticpollution"
-            ),
-            WasteReport(
-                2,
-                "Large amount of microplastics in the water",
-                "Klang River, Kuala Lumpur",
-                Date(System.currentTimeMillis() - 86400000 * 5), // 5 days ago
-                "microplastic_pollution"
-            ),
-            WasteReport(
-                3,
-                "Fishing nets and debris washed ashore",
-                "Port Dickson Beach, Negeri Sembilan",
-                Date(System.currentTimeMillis() - 86400000 * 10), // 10 days ago
-                "beach"
-            )
-        )
+    // State for pollution map
+    var showPollutionMap by remember { mutableStateOf(false) }
+    var selectedReportLocation by remember { mutableStateOf("") }
+    
+    // Load reports
+    LaunchedEffect(key1 = Unit) {
+        wasteReportStore.wasteReportsFlow.collect { reportsList ->
+            reports = reportsList
+        }
     }
+    
+    // Date formatter
+    val dateFormat = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
     
     Box(
         modifier = Modifier
@@ -115,7 +125,7 @@ fun WasteTrackingScreen(
             ) {
                 IconButton(onClick = onNavigateBack) {
                     Icon(
-                        imageVector = Icons.Default.ArrowBack,
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
                         tint = OceanBlue
                     )
@@ -150,23 +160,59 @@ fun WasteTrackingScreen(
             // Tab Content
             when (selectedTabIndex) {
                 0 -> ReportTab(
-                    hasPhoto = hasPhoto,
+                    photoUri = photoUri,
                     onPhotoClick = { showPhotoOptions = true },
-                    onRemovePhoto = { hasPhoto = false },
+                    onRemovePhoto = { photoUri = null },
                     description = description,
                     onDescriptionChange = { description = it },
                     location = location,
                     onLocationClick = { showLocationDialog = true },
+                    isLoading = isLoading,
                     onSubmit = {
-                        // In a real app, this would save the report
-                        // For now, just show a success message
-                        showMapDialog = true
+                        if (description.isBlank()) {
+                            Toast.makeText(context, "Please add a description", Toast.LENGTH_SHORT).show()
+                            return@ReportTab
+                        }
+                        
+                        if (location.isBlank()) {
+                            Toast.makeText(context, "Please add a location", Toast.LENGTH_SHORT).show()
+                            return@ReportTab
+                        }
+                        
+                        coroutineScope.launch {
+                            isLoading = true
+                            try {
+                                // Use the URI as a string
+                                val photoUriString = photoUri?.toString()
+                                wasteReportStore.addWasteReport(description, location, photoUriString)
+                                
+                                // Reset form
+                                description = ""
+                                photoUri = null
+                                
+                                // Show success message
+                                showSuccessMessage = true
+                                Toast.makeText(context, "Report submitted successfully!", Toast.LENGTH_SHORT).show()
+                                
+                                // Auto-switch to history tab
+                                selectedTabIndex = 1
+                            } finally {
+                                isLoading = false
+                            }
+                        }
+                    },
+                    onShowMap = { loc ->
+                        selectedReportLocation = loc
+                        showPollutionMap = true
                     }
                 )
                 1 -> HistoryTab(
-                    reports = sampleReports,
+                    reports = reports,
                     dateFormat = dateFormat,
-                    onMapClick = { showMapDialog = true }
+                    onMapClick = { location ->
+                        selectedReportLocation = location
+                        showPollutionMap = true
+                    }
                 )
             }
         }
@@ -200,12 +246,14 @@ fun WasteTrackingScreen(
                                 .padding(vertical = 8.dp),
                             horizontalArrangement = Arrangement.SpaceEvenly
                         ) {
-                            // Camera Button
+                            // Camera Button (For testing, we'll use a sample image)
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier.clickable {
-                                    hasPhoto = true
-                                    showPhotoOptions = false
+                                    coroutineScope.launch {
+                                        photoUri = photoManager.getSampleImageUri()
+                                        showPhotoOptions = false
+                                    }
                                 }
                             ) {
                                 Box(
@@ -229,12 +277,14 @@ fun WasteTrackingScreen(
                                 )
                             }
                             
-                            // Gallery Button
+                            // Gallery Button (For testing, we'll use a sample image)
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier.clickable {
-                                    hasPhoto = true
-                                    showPhotoOptions = false
+                                    coroutineScope.launch {
+                                        photoUri = photoManager.getSampleImageUri()
+                                        showPhotoOptions = false
+                                    }
                                 }
                             ) {
                                 Box(
@@ -314,20 +364,118 @@ fun WasteTrackingScreen(
                             }
                         )
                         
-                        // Map Placeholder
+                        // Get Current Location Button
+                        Button(
+                            onClick = {
+                                coroutineScope.launch {
+                                    // In a real app, check permissions and get real location
+                                    // For testing, use a sample location
+                                    val (_, address) = locationManager.getSampleLocation()
+                                    location = address
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 16.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = OceanBlue
+                            ),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.LocationOn,
+                                contentDescription = "Get Current Location",
+                                tint = White
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Use Current Location")
+                        }
+                        
+                        // Google Map instead of placeholder
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(200.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(LightBlue),
-                            contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = "Map View",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = TextGray
-                            )
+                            // Convert location string to LatLng (using the same logic as in PollutionMapDialog)
+                            val locationCoordinates = remember(location) {
+                                when {
+                                    location.contains("Kuala Lumpur", ignoreCase = true) -> LatLng(3.139, 101.6869)
+                                    location.contains("Shah Alam", ignoreCase = true) -> LatLng(3.0733, 101.5185)
+                                    location.contains("Klang", ignoreCase = true) -> LatLng(3.0449, 101.4455)
+                                    location.contains("Cyberjaya", ignoreCase = true) -> LatLng(2.9188, 101.6520)
+                                    location.contains("Putrajaya", ignoreCase = true) -> LatLng(2.9264, 101.6964)
+                                    location.contains("Penang", ignoreCase = true) -> LatLng(5.4141, 100.3288)
+                                    location.contains("Johor", ignoreCase = true) -> LatLng(1.4927, 103.7414)
+                                    location.contains("Malacca", ignoreCase = true) -> LatLng(2.1896, 102.2501)
+                                    location.contains("Ipoh", ignoreCase = true) -> LatLng(4.5975, 101.0901)
+                                    location.contains("Kuching", ignoreCase = true) -> LatLng(1.5535, 110.3593)
+                                    location.contains("Kota Kinabalu", ignoreCase = true) -> LatLng(5.9804, 116.0735)
+                                    else -> LatLng(3.139, 101.6869) // Default to KL
+                                }
+                            }
+                            
+                            // Map properties and UI settings
+                            val mapProperties by remember {
+                                mutableStateOf(
+                                    MapProperties(
+                                        isMyLocationEnabled = false,
+                                        mapType = MapType.NORMAL
+                                    )
+                                )
+                            }
+                            
+                            val mapUiSettings by remember {
+                                mutableStateOf(
+                                    MapUiSettings(
+                                        zoomControlsEnabled = true,
+                                        myLocationButtonEnabled = false
+                                    )
+                                )
+                            }
+                            
+                            // Camera position
+                            val cameraPositionState = rememberCameraPositionState {
+                                position = CameraPosition.fromLatLngZoom(locationCoordinates, 15f)
+                            }
+                            
+                            // Effect to move camera to location
+                            LaunchedEffect(locationCoordinates) {
+                                cameraPositionState.animate(
+                                    update = CameraUpdateFactory.newLatLngZoom(
+                                        locationCoordinates,
+                                        15f
+                                    ),
+                                    durationMs = 1000
+                                )
+                            }
+                            
+                            GoogleMap(
+                                modifier = Modifier.fillMaxSize(),
+                                properties = mapProperties,
+                                uiSettings = mapUiSettings,
+                                cameraPositionState = cameraPositionState,
+                                onMapClick = { latLng ->
+                                    // Get address from location (in a real app)
+                                    // For this mock, we'll use a predefined location name
+                                    val newLocation = when {
+                                        latLng.latitude > 5.0 -> "Penang, Malaysia"
+                                        latLng.latitude > 4.0 -> "Ipoh, Malaysia"
+                                        latLng.latitude > 3.0 -> "Kuala Lumpur, Malaysia"
+                                        latLng.latitude > 2.0 -> "Putrajaya, Malaysia"
+                                        else -> "Johor, Malaysia"
+                                    }
+                                    location = newLocation
+                                }
+                            ) {
+                                // Add a marker at the current location
+                                Marker(
+                                    state = MarkerState(position = locationCoordinates),
+                                    title = "Selected Location",
+                                    snippet = location
+                                )
+                            }
                         }
                         
                         // Buttons
@@ -342,12 +490,7 @@ fun WasteTrackingScreen(
                             }
                             
                             Button(
-                                onClick = {
-                                    if (location.isEmpty()) {
-                                        location = "Taman Tasik Shah Alam, Selangor"
-                                    }
-                                    showLocationDialog = false
-                                },
+                                onClick = { showLocationDialog = false },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = OceanBlue
                                 ),
@@ -361,75 +504,48 @@ fun WasteTrackingScreen(
             }
         }
         
-        // Map Dialog
-        if (showMapDialog) {
-            Dialog(onDismissRequest = { showMapDialog = false }) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(400.dp)
-                        .padding(16.dp),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(16.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Pollution Map",
-                                style = MaterialTheme.typography.titleLarge,
-                                color = OceanBlue,
-                                fontWeight = FontWeight.Bold
-                            )
-                            
-                            IconButton(onClick = { showMapDialog = false }) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Close,
-                                    contentDescription = "Close",
-                                    tint = TextGray
-                                )
-                            }
-                        }
-                        
-                        // Map Placeholder with Pollution Pins
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(LightBlue),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Text(
-                                    text = "Interactive Map",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = TextGray
-                                )
-                                
-                                Spacer(modifier = Modifier.height(16.dp))
-                                
-                                // Sample Pollution Pins
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                ) {
-                                    PollutionPin("Plastic", Color.Red)
-                                    PollutionPin("Chemical", Color.Yellow)
-                                    PollutionPin("Organic", Color.Green)
-                                }
-                            }
-                        }
+        // Pollution Map Dialog
+        if (showPollutionMap) {
+            PollutionMapDialog(
+                location = selectedReportLocation,
+                onDismiss = { showPollutionMap = false },
+                onLocationSelected = { newLocation -> 
+                    location = newLocation
+                }
+            )
+        }
+        
+        // Success Message Snackbar
+        if (showSuccessMessage) {
+            Snackbar(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .align(Alignment.BottomCenter),
+                action = {
+                    TextButton(onClick = { showSuccessMessage = false }) {
+                        Text("Dismiss")
                     }
                 }
+            ) {
+                Text("Report submitted successfully!")
+            }
+            
+            // Auto-dismiss after 3 seconds
+            LaunchedEffect(showSuccessMessage) {
+                kotlinx.coroutines.delay(3000)
+                showSuccessMessage = false
+            }
+        }
+        
+        // Loading Indicator
+        if (isLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.5f)),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = OceanBlue)
             }
         }
     }
@@ -437,14 +553,16 @@ fun WasteTrackingScreen(
 
 @Composable
 fun ReportTab(
-    hasPhoto: Boolean,
+    photoUri: Uri?,
     onPhotoClick: () -> Unit,
     onRemovePhoto: () -> Unit,
     description: String,
     onDescriptionChange: (String) -> Unit,
     location: String,
     onLocationClick: () -> Unit,
-    onSubmit: () -> Unit
+    isLoading: Boolean,
+    onSubmit: () -> Unit,
+    onShowMap: (String) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -469,16 +587,20 @@ fun ReportTab(
                     .clickable(onClick = onPhotoClick),
                 contentAlignment = Alignment.Center
             ) {
-                if (hasPhoto) {
+                if (photoUri != null) {
                     // Photo Preview
                     Box(
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        // Placeholder for photo
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(LightBlue)
+                        // Display the selected photo
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current)
+                                .data(photoUri)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = "Selected Photo",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
                         )
                         
                         // Remove Photo Button
@@ -550,12 +672,31 @@ fun ReportTab(
             ),
             readOnly = true,
             trailingIcon = {
-                IconButton(onClick = onLocationClick) {
-                    Icon(
-                        imageVector = Icons.Outlined.LocationOn,
-                        contentDescription = "Select Location",
-                        tint = OceanBlue
-                    )
+                Row {
+                    // Map button to open pollution map dialog
+                    IconButton(onClick = {
+                        if (location.isNotBlank()) {
+                            onShowMap(location)
+                        } else {
+                            // If no location is selected, open location dialog
+                            onLocationClick()
+                        }
+                    }) {
+                        Icon(
+                            imageVector = Icons.Outlined.Map,
+                            contentDescription = "View on Map",
+                            tint = OceanBlue
+                        )
+                    }
+                    
+                    // Location button to open location dialog
+                    IconButton(onClick = onLocationClick) {
+                        Icon(
+                            imageVector = Icons.Outlined.LocationOn,
+                            contentDescription = "Select Location",
+                            tint = OceanBlue
+                        )
+                    }
                 }
             }
         )
@@ -569,7 +710,8 @@ fun ReportTab(
             colors = ButtonDefaults.buttonColors(
                 containerColor = OceanBlue
             ),
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(12.dp),
+            enabled = !isLoading && description.isNotBlank() && location.isNotBlank()
         ) {
             Text("Submit Report")
         }
@@ -580,75 +722,119 @@ fun ReportTab(
 fun HistoryTab(
     reports: List<WasteReport>,
     dateFormat: SimpleDateFormat,
-    onMapClick: () -> Unit
+    onMapClick: (String) -> Unit
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(top = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        reports.forEach { report ->
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onMapClick() },
-                colors = CardDefaults.cardColors(
-                    containerColor = White
-                ),
-                shape = RoundedCornerShape(16.dp)
+    if (reports.isEmpty()) {
+        // Empty state
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = "No Reports",
+                    tint = OceanBlue,
+                    modifier = Modifier.size(64.dp)
+                )
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Text(
+                    text = "No reports yet",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = OceanBlue
+                )
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Text(
+                    text = "Your submitted waste reports will appear here",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = TextGray,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    } else {
+        // List of reports
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            items(reports) { report ->
+                Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp)
+                        .clickable { onMapClick(report.location) },
+                    colors = CardDefaults.cardColors(
+                        containerColor = White
+                    ),
+                    shape = RoundedCornerShape(16.dp)
                 ) {
-                    // Report Image
-                    report.photoUri?.let { photoUri ->
-                        Image(
-                            painter = painterResource(
-                                id = when (photoUri) {
-                                    "plastic_pollution" -> R.drawable.plastic_pollution
-                                    "microplastic_pollution" -> R.drawable.microplastic_pollution
-                                    "beach" -> R.drawable.beach
-                                    else -> R.drawable.ocean_mascot
-                                }
-                            ),
-                            contentDescription = "Waste Report Image",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(200.dp)
-                                .clip(RoundedCornerShape(8.dp)),
-                            contentScale = ContentScale.Crop
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                    }
-                    
-                    Text(
-                        text = report.description,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = TextGray
-                    )
-                    
-                    Spacer(modifier = Modifier.height(8.dp))
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
                     ) {
-                        Text(
-                            text = report.location,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = OceanBlue
-                        )
+                        // Report Image
+                        report.photoUri?.let { photoUri ->
+                            // Display either the photo from URI or a fallback image
+                            val imageModel = if (photoUri.startsWith("content://") || photoUri.startsWith("file://")) {
+                                photoUri
+                            } else {
+                                // Use a drawable resource as fallback
+                                R.drawable.plastic_pollution
+                            }
+                            
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(imageModel)
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = "Waste Report Image",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(200.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop,
+                                error = painterResource(id = R.drawable.plastic_pollution)
+                            )
+                            
+                            Spacer(modifier = Modifier.height(16.dp))
+                        }
                         
                         Text(
-                            text = dateFormat.format(report.date),
-                            style = MaterialTheme.typography.bodySmall,
+                            text = report.description,
+                            style = MaterialTheme.typography.bodyLarge,
                             color = TextGray
                         )
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = report.location,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = OceanBlue
+                            )
+                            
+                            Text(
+                                text = dateFormat.format(report.date),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextGray
+                            )
+                        }
                     }
                 }
             }

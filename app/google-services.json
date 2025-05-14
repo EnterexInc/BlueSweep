@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "77889274792",
+    "project_id": "bluesweep-15396",
+    "storage_bucket": "bluesweep-15396.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:77889274792:android:60b93aa1e3e9d5f316539d",
+        "android_client_info": {
+          "package_name": "com.example.bluesweepmock"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA9xxLdeaIGs4d3guC5AiYpcZkWwfc_yS0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
